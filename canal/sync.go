@@ -85,6 +85,26 @@ func (c *Canal) runSyncBinlog() error {
 		// which tells the whole transaction is over.
 		// TODO: If we meet any DDL query, we must save too.
 		switch e := ev.Event.(type) {
+		case *replication.TransactionPayloadEvent:
+			for _, iEv := range e.Events {
+				switch iEv.Event.(type) {
+				case *replication.RowsEvent:
+					err = c.handleRowsEvent(iEv)
+					if err != nil {
+						e := errors.Cause(err)
+						// if error is not ErrExcludedTable or ErrTableNotExist or ErrMissingTableMeta, stop canal
+						if e != ErrExcludedTable &&
+							e != schema.ErrTableNotExist &&
+							e != schema.ErrMissingTableMeta {
+							c.cfg.Logger.Errorf("handle rows event at (%s, %d) error %v", pos.Name, curPos, err)
+							return errors.Trace(err)
+						}
+					}
+				default:
+					continue
+				}
+			}
+			continue
 		case *replication.RotateEvent:
 			pos.Name = string(e.NextLogName)
 			pos.Pos = uint32(e.Position)
